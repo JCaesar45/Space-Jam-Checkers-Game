@@ -1,0 +1,194 @@
+<!-- Space Jam Checkers – HTML -->
+<div id="app" class="app">
+  <!-- Splash / Main Menu -->
+  <section id="menu" class="screen screen--active">
+    <div class="menu-card">
+      <h1 class="title">Space Jam Checkers</h1>
+      <p class="subtitle">Toon Squad vs Monstars</p>
+
+      <div class="menu-grid">
+        <div class="menu-group">
+          <label class="label">Game Mode</label>
+          <select id="modeSelect" class="select">
+            <option value="pvp">Local: Player vs Player</option>
+            <option value="ai-easy">Solo: vs AI (Easy)</option>
+            <option value="ai-medium">Solo: vs AI (Medium)</option>
+            <option value="ai-hard">Solo: vs AI (Hard)</option>
+          </select>
+        </div>
+
+        <div class="menu-group">
+          <label class="label">First Move</label>
+          <select id="firstMover" class="select">
+            <option value="toon">Toon Squad</option>
+            <option value="monstars">Monstars</option>
+          </select>
+        </div>
+
+        <div class="menu-group">
+          <label class="label">Turn Timer (sec)</label>
+          <input id="turnTimerInput" type="number" min="0" max="120" value="0" class="input" />
+          <small class="muted">0 = no timer</small>
+        </div>
+      </div>
+
+      <div class="menu-actions">
+        <button id="btnStart" class="btn primary">Start Game</button>
+        <button id="btnTutorialOpen" class="btn">Tutorial</button>
+        <button id="btnSettingsOpen" class="btn">Settings</button>
+      </div>
+
+      <div class="legal tiny">
+        Fan project for portfolio purposes. No copyrighted music or imagery is bundled.
+      </div>
+    </div>
+  </section>
+
+  <!-- Game Screen -->
+  <section id="game" class="screen">
+    <header class="hud">
+      <div class="hud-left">
+        <div class="team team--toon">
+          <div class="team-badge badge--toon" aria-hidden="true"></div>
+          <div>
+            <div class="team-name">Toon Squad</div>
+            <div class="team-meta">
+              <span id="toonScore">0</span> wins
+              • Kings: <span id="toonKings">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-center">
+        <div class="turn-indicator">
+          <span id="turnLabel">Toon Squad to move</span>
+          <span id="timer" class="timer hidden">00</span>
+        </div>
+        <div class="hud-actions">
+          <button id="btnUndo" class="btn small">Undo</button>
+          <button id="btnRestart" class="btn small">Restart</button>
+          <button id="btnBackToMenu" class="btn small">Menu</button>
+        </div>
+      </div>
+
+      <div class="hud-right">
+        <div class="team team--monstars">
+          <div class="team-badge badge--monstars" aria-hidden="true"></div>
+          <div>
+            <div class="team-name">Monstars</div>
+            <div class="team-meta">
+              <span id="monstarsScore">0</span> wins
+              • Kings: <span id="monstarsKings">0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <div class="stage-bg">
+        <div class="stars" aria-hidden="true"></div>
+        <div class="parallax parallax--1"></div>
+        <div class="parallax parallax--2"></div>
+      </div>
+
+      <div id="boardWrapper" class="board-wrapper">
+        <div id="board" class="board" role="grid" aria-label="Checkers board"></div>
+      </div>
+
+      <aside class="sidebar">
+        <div class="panel">
+          <h3 class="panel-title">Move Log</h3>
+          <ol id="moveLog" class="log"></ol>
+        </div>
+        <div class="panel">
+          <h3 class="panel-title">Settings</h3>
+          <div class="row">
+            <label class="switch">
+              <input id="toggleSfx" type="checkbox" checked />
+              <span>Sound FX</span>
+            </label>
+          </div>
+          <div class="row">
+            <label class="switch">
+              <input id="toggleMusic" type="checkbox" />
+              <span>Music (simple loop)</span>
+            </label>
+          </div>
+          <div class="row">
+            <label class="switch">
+              <input id="toggleHints" type="checkbox" checked />
+              <span>Show move hints</span>
+            </label>
+          </div>
+          <div class="row">
+            <button id="btnSave" class="btn small">Save Game</button>
+            <button id="btnLoad" class="btn small">Load Game</button>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <footer class="footnote tiny">
+      Mandatory jumps enforced • Multi-captures supported • Click a piece to see moves
+    </footer>
+  </section>
+
+  <!-- Results Modal -->
+  <dialog id="resultsModal" class="modal">
+    <div class="modal-card">
+      <h2 id="resultTitle">Game Over</h2>
+      <p id="resultBody">Toon Squad wins!</p>
+      <div class="modal-actions">
+        <button id="btnRematch" class="btn primary">Rematch</button>
+        <button id="btnCloseResult" class="btn">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Tutorial Modal -->
+  <dialog id="tutorialModal" class="modal">
+    <div class="modal-card">
+      <h2>How to Play</h2>
+      <ul class="bullet">
+        <li>Pieces move diagonally forward to empty dark squares.</li>
+        <li>You must capture if a capture is available (mandatory jumps).</li>
+        <li>Multi-captures are allowed (keep jumping if possible).</li>
+        <li>Reach the far side to crown a King; Kings move both directions.</li>
+        <li>Win by capturing all opponent pieces or when the opponent cannot move.</li>
+      </ul>
+      <h3>Controls</h3>
+      <ul class="bullet">
+        <li>Click/tap a piece to highlight its legal moves. Click/tap a target square.</li>
+        <li><strong>Undo</strong> reverts the last move (local games only).</li>
+        <li>Enable/disable hints, music, and SFX in Settings.</li>
+      </ul>
+      <div class="modal-actions">
+        <button id="btnTutorialClose" class="btn primary">Got it</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Settings Modal -->
+  <dialog id="settingsModal" class="modal">
+    <div class="modal-card">
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <label>Music volume
+          <input id="musicVol" type="range" min="0" max="1" step="0.01" value="0.15" />
+        </label>
+        <label>SFX volume
+          <input id="sfxVol" type="range" min="0" max="1" step="0.01" value="0.6" />
+        </label>
+        <label>Board size
+          <input id="boardSizeRange" type="range" min="60" max="96" step="2" value="84" />
+          <small class="muted">Percent of viewport width</small>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="btnSettingsClose" class="btn primary">Close</button>
+      </div>
+    </div>
+  </dialog>
+</div>
