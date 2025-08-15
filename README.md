@@ -1,4 +1,5 @@
 ```
+
 # Space Jam Checkers Game 🎮🏀
 
 Welcome to the **Space Jam Checkers Game**, a fun, interactive, and visually appealing checkers game inspired by the iconic Space Jam universe! This project is designed to showcase playful design, engaging animations, and sound effects, all built for the web.
