@@ -1,9 +1,4 @@
-/* Space Jam Checkers — JavaScript
-   - American checkers with mandatory jumps & multi-captures
-   - PvP + AI (Easy / Medium / Hard via depth-limited minimax)
-   - Click-to-move, hints, undo, restart, save/load, per-turn timer
-   - WebAudio SFX + optional simple music loop
-*/
+/* Space Jam Checkers — Full JavaScript with fixes for music, save/load, hints, and performMove */
 
 (() => {
   // ---------- DOM helpers ----------
@@ -54,121 +49,43 @@
   const toonKingsEl = $("#toonKings");
   const monstarsKingsEl = $("#monstarsKings");
 
-  // ---------- Audio (purely synthesized, no assets) ----------
-  const AudioSys = (() => {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const master = ctx.createGain();
-    master.gain.value = 0.9;
-    master.connect(ctx.destination);
+  // ---------- Background Music ----------
+  const musicAudio = new Audio(
+    "https://kappa.vgmsite.com/soundtracks/looney-tunes-basketball-1995-snes/gbmxvtli/04.%20Basketball%20Game%201%20%28Part%201%29.mp3"
+  );
+  musicAudio.loop = true;
+  musicAudio.volume = parseFloat(musicVol.value);
 
-    const sfx = ctx.createGain();
-    sfx.gain.value = parseFloat(sfxVol.value);
-    sfx.connect(master);
-    const music = ctx.createGain();
-    music.gain.value = parseFloat(musicVol.value);
-    music.connect(master);
+  function playMusic() {
+    if (toggleMusic.checked) musicAudio.play();
+  }
+  function stopMusic() {
+    musicAudio.pause();
+  }
 
-    function beep({ freq = 440, dur = 0.08, type = "triangle", vol = 0.7 }) {
-      if (!toggleSfx.checked) return;
-      const osc = ctx.createOscillator();
-      const g = ctx.createGain();
-      osc.type = type;
-      osc.frequency.value = freq;
-      g.gain.value = sfx.gain.value * vol;
-      osc.connect(g).connect(sfx);
-      const t = ctx.currentTime;
-      osc.start(t);
-      osc.stop(t + dur);
-      g.gain.setValueAtTime(g.gain.value, t);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    }
-
-    // Simple 4-bar loop (original notes)
-    let playing = false,
-      loopId = null;
-    function startMusic() {
-      if (playing || !toggleMusic.checked) return;
-      playing = true;
-      const tempo = 96,
-        beat = 60 / tempo;
-      const seq = [330, 392, 440, 392, 330, 392, 494, 523];
-      const schedule = () => {
-        const now = ctx.currentTime + 0.1;
-        for (let m = 0; m < 4; m++) {
-          seq.forEach((f, i) => {
-            const osc = ctx.createOscillator();
-            const g = ctx.createGain();
-            osc.type = "sawtooth";
-            osc.frequency.value = f;
-            g.gain.value = music.gain.value * 0.25;
-            const st = now + (m * seq.length + i) * beat;
-            osc.connect(g).connect(music);
-            osc.start(st);
-            g.gain.setValueAtTime(g.gain.value, st);
-            g.gain.exponentialRampToValueAtTime(0.0001, st + beat * 0.45);
-            osc.stop(st + beat * 0.45);
-          });
-        }
-      };
-      schedule();
-      loopId = setInterval(schedule, 4 * seq.length * beat * 1000);
-    }
-    function stopMusic() {
-      playing = false;
-      if (loopId) clearInterval(loopId);
-      loopId = null;
-    }
-
-    // UI bindings
-    musicVol.addEventListener(
-      "input",
-      () => (music.gain.value = parseFloat(musicVol.value))
-    );
-    sfxVol.addEventListener(
-      "input",
-      () => (sfx.gain.value = parseFloat(sfxVol.value))
-    );
-    toggleMusic.addEventListener("change", () =>
-      toggleMusic.checked ? startMusic() : stopMusic()
-    );
-    window.addEventListener("pointerdown", () => ctx.resume(), { once: true });
-
-    return {
-      move: () => beep({ freq: 460, dur: 0.06, type: "triangle", vol: 0.8 }),
-      capture: () => beep({ freq: 200, dur: 0.1, type: "square", vol: 1.0 }),
-      crown: () => beep({ freq: 880, dur: 0.14, type: "sine", vol: 0.9 }),
-      win: () => {
-        [523, 659, 784].forEach((f, i) =>
-          setTimeout(
-            () => beep({ freq: f, dur: 0.12, type: "sine", vol: 1 }),
-            i * 120
-          )
-        );
-      },
-      tick: () => beep({ freq: 700, dur: 0.035, type: "square", vol: 0.5 }),
-      startMusic,
-      stopMusic
-    };
-  })();
+  toggleMusic.addEventListener("change", () => {
+    toggleMusic.checked ? playMusic() : stopMusic();
+  });
+  musicVol.addEventListener("input", () => {
+    musicAudio.volume = parseFloat(musicVol.value);
+  });
 
   // ---------- Game constants ----------
   const SIZE = 8;
   const DARK = (r, c) => (r + c) % 2 === 1;
-
-  // Pieces: { side:'toon'|'monstars', king:boolean }
   const SIDES = { TOON: "toon", MON: "monstars" };
 
   // ---------- State ----------
   const State = {
-    board: null, // 8x8, null or piece
+    board: null,
     turn: SIDES.TOON,
-    selected: null, // {r,c} or null
-    forcedChain: null, // piece index that must continue multi-capture
-    mode: "pvp", // pvp | ai-easy | ai-medium | ai-hard
-    timerPerTurn: 0, // seconds (0 = off)
+    selected: null,
+    forcedChain: null,
+    mode: "pvp",
+    timerPerTurn: 0,
     timerRemaining: 0,
     timerHandle: null,
-    history: [], // stack of prior states for undo
+    history: [],
     scores: { toon: 0, monstars: 0 }
   };
 
@@ -179,20 +96,16 @@
 
   function initialBoard() {
     const b = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
-    for (let r = 0; r < 3; r++) {
-      for (let c = 0; c < SIZE; c++) {
+    for (let r = 0; r < 3; r++)
+      for (let c = 0; c < SIZE; c++)
         if (DARK(r, c)) b[r][c] = { side: SIDES.MON, king: false };
-      }
-    }
-    for (let r = SIZE - 3; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
+    for (let r = SIZE - 3; r < SIZE; r++)
+      for (let c = 0; c < SIZE; c++)
         if (DARK(r, c)) b[r][c] = { side: SIDES.TOON, king: false };
-      }
-    }
     return b;
   }
 
-  // Render
+  // ---------- Render ----------
   function renderBoard() {
     boardEl.innerHTML = "";
     boardEl.style.width = `min(${boardSizeRange.value}vw, ${boardSizeRange.value}vh)`;
@@ -213,15 +126,14 @@
             (piece.king ? " piece--king" : "");
           el.dataset.r = r;
           el.dataset.c = c;
-          if (State.turn === piece.side && !State.forcedChain) {
-            el.addEventListener("click", onPieceClick);
-          } else if (
-            State.forcedChain &&
-            State.forcedChain.r === r &&
-            State.forcedChain.c === c
+          if (
+            (State.turn === piece.side && !State.forcedChain) ||
+            (State.forcedChain &&
+              State.forcedChain.r === r &&
+              State.forcedChain.c === c)
           ) {
             el.addEventListener("click", onPieceClick);
-            el.classList.add("piece--selected");
+            if (State.forcedChain) el.classList.add("piece--selected");
           }
           sq.appendChild(el);
         }
@@ -234,9 +146,9 @@
 
   function updateHUD() {
     const kings = countKings(State.board);
-    $("#toonKings").textContent = kings.toon;
-    $("#monstarsKings").textContent = kings.monstars;
-    $("#turnLabel").textContent =
+    toonKingsEl.textContent = kings.toon;
+    monstarsKingsEl.textContent = kings.monstars;
+    turnLabel.textContent =
       (State.turn === SIDES.TOON ? "Toon Squad" : "Monstars") + " to move";
     toonScoreEl.textContent = State.scores.toon;
     monstarsScoreEl.textContent = State.scores.monstars;
@@ -249,13 +161,12 @@
       for (let c = 0; c < SIZE; c++) {
         const p = board[r][c];
         if (!p || !p.king) continue;
-        if (p.side === SIDES.TOON) t++;
-        else m++;
+        p.side === SIDES.TOON ? t++ : m++;
       }
     return { toon: t, monstars: m };
   }
 
-  // ---------- Move generation ----------
+  // ---------- Moves ----------
   const DIRS = {
     toon: [
       [-1, -1],
@@ -283,27 +194,25 @@
       : DIRS.monstars;
     const moves = [],
       captures = [];
-    // simple moves
     for (const [dr, dc] of dirs) {
       const nr = r + dr,
         nc = c + dc;
       if (inBounds(nr, nc) && !board[nr][nc])
         moves.push({ from: [r, c], to: [nr, nc] });
     }
-    // captures
     for (const [dr, dc] of DIRS.king) {
-      // capture can be backwards for kings; for men only forward? In American checkers, men capture forward only. We'll respect that:
-      const canDir = p.king
-        ? true
-        : (p.side === SIDES.TOON && dr === -1) ||
-          (p.side === SIDES.MON && dr === 1);
+      const canDir =
+        p.king ||
+        (p.side === SIDES.TOON && dr === -1) ||
+        (p.side === SIDES.MON && dr === 1);
       if (!canDir) continue;
       const mr = r + dr,
-        mc = c + dc,
-        jr = r + 2 * dr,
+        mc = c + dc;
+      const jr = r + 2 * dr,
         jc = c + 2 * dc;
       if (
         inBounds(jr, jc) &&
+        inBounds(mr, mc) &&
         board[mr][mc] &&
         board[mr][mc].side !== p.side &&
         !board[jr][jc]
@@ -328,7 +237,6 @@
     return { captures: caps, moves: quiet };
   }
 
-  // Apply / Undo
   function applyMove(board, mv) {
     const nb = cloneBoard(board);
     const [fr, fc] = mv.from,
@@ -336,29 +244,72 @@
     const p = { ...nb[fr][fc] };
     nb[fr][fc] = null;
     nb[tr][tc] = p;
+
     let captured = null;
     if (mv.over) {
       const [or, oc] = mv.over;
       captured = { ...nb[or][oc] };
       nb[or][oc] = null;
     }
-    // crown
+
     if (!p.king) {
       if (p.side === SIDES.TOON && tr === 0) {
         p.king = true;
-        nb[tr][tc] = p;
         mv.crowned = true;
       }
       if (p.side === SIDES.MON && tr === SIZE - 1) {
         p.king = true;
-        nb[tr][tc] = p;
         mv.crowned = true;
       }
     }
+
     return { board: nb, captured };
   }
 
-  // ---------- Turn / Timer ----------
+  // ---------- Perform Move ----------
+  function performMove(mv, isAuto = false) {
+    State.history.push({
+      board: cloneBoard(State.board),
+      turn: State.turn,
+      selected: State.selected,
+      forcedChain: State.forcedChain
+    });
+
+    const { board: newBoard, captured } = applyMove(State.board, mv);
+    State.board = newBoard;
+
+    if (captured) {
+      State.scores[captured.side === SIDES.TOON ? "monstars" : "toon"]++;
+    }
+
+    if (mv.over) {
+      const further = pieceMoves(State.board, mv.to[0], mv.to[1]).captures;
+      if (further.length) {
+        State.forcedChain = { r: mv.to[0], c: mv.to[1] };
+        State.selected = { r: mv.to[0], c: mv.to[1] };
+        renderBoard();
+        return; // keep turn
+      }
+    }
+
+    State.forcedChain = null;
+    State.selected = null;
+
+    logMove(mv);
+
+    const movesLeft = allMoves(
+      State.board,
+      State.turn === SIDES.TOON ? SIDES.MON : SIDES.TOON
+    );
+    if (movesLeft.captures.length === 0 && movesLeft.moves.length === 0) {
+      endGame(State.turn, "No moves left");
+      return;
+    }
+
+    switchTurn();
+  }
+
+  // ---------- Timer ----------
   function startTimer() {
     clearInterval(State.timerHandle);
     const secs = parseInt(turnTimerInput.value || "0", 10);
@@ -376,18 +327,18 @@
       AudioSys.tick();
       if (State.timerRemaining <= 0) {
         clearInterval(State.timerHandle);
-        // Auto-pass/lose: if AI side, force AI move; if player side, forfeit turn by random legal move
         const { captures, moves } = allMoves(State.board, State.turn);
         const options = captures.length ? captures : moves;
-        if (options.length) {
-          const mv = options[Math.floor(Math.random() * options.length)];
-          performMove(mv, true);
-        } else {
+        if (options.length)
+          performMove(
+            options[Math.floor(Math.random() * options.length)],
+            true
+          );
+        else
           endGame(
             State.turn === SIDES.TOON ? SIDES.MON : SIDES.TOON,
             "Time ran out"
           );
-        }
       }
     }, 1000);
   }
@@ -398,45 +349,34 @@
     State.forcedChain = null;
     renderBoard();
     startTimer();
-    // AI turn?
-    if (State.mode.startsWith("ai") && State.turn === SIDES.MON) {
+
+    if (State.mode.startsWith("ai") && State.turn === SIDES.MON)
       setTimeout(aiMove, 300);
-    }
   }
 
-  // ---------- UI interactions ----------
+  // ---------- UI ----------
   function onPieceClick(e) {
     e.stopPropagation();
     const r = parseInt(e.currentTarget.dataset.r, 10);
     const c = parseInt(e.currentTarget.dataset.c, 10);
-    // if we are in forced chain, only this piece is allowed (already ensured)
     State.selected = { r, c };
     renderBoard();
-    // re-apply selection highlight
-    const el = [...document.querySelectorAll(".piece")].find(
-      (p) => +p.dataset.r === r && +p.dataset.c === c
-    );
-    if (el) el.classList.add("piece--selected");
-    if (toggleHints.checked) highlightTargets();
   }
 
   function onSquareClick(e) {
     const r = parseInt(e.currentTarget.dataset.r, 10);
     const c = parseInt(e.currentTarget.dataset.c, 10);
     if (!State.selected) return;
-
     const { r: sr, c: sc } = State.selected;
     const moves = legalMovesForSelected(sr, sc);
     const mv = moves.find((m) => m.to[0] === r && m.to[1] === c);
     if (!mv) return;
-
     performMove(mv);
   }
 
   function legalMovesForSelected(r, c) {
     const p = State.board[r][c];
     if (!p) return [];
-    // Mandatory capture rule
     const all = allMoves(State.board, State.turn);
     const { moves, captures } = pieceMoves(State.board, r, c);
     if (captures.length || all.captures.length) return captures;
@@ -444,7 +384,6 @@
   }
 
   function highlightTargets() {
-    // Clear old
     document
       .querySelectorAll(".square--target")
       .forEach((el) => el.classList.remove("square--target"));
@@ -452,102 +391,35 @@
     const { r, c } = State.selected;
     const legal = legalMovesForSelected(r, c);
     legal.forEach((mv) => {
-      const [tr, tc] = mv.to;
-      const sel = `.square[data-r="${tr}"][data-c="${tc}"]`;
-      const sq = document.querySelector(sel);
+      const sq = document.querySelector(
+        `.square[data-r="${mv.to[0]}"][data-c="${mv.to[1]}"]`
+      );
       if (sq) sq.classList.add("square--target");
     });
   }
 
-  // ---------- Logging ----------
   function algebra([r, c]) {
     return String.fromCharCode(97 + c) + (SIZE - r);
   }
   function logMove(mv) {
     const li = document.createElement("li");
-    const text = mv.over
-      ? `${algebra(mv.from)} x ${algebra(mv.to)}${mv.crowned ? " (K)" : ""}`
-      : `${algebra(mv.from)} - ${algebra(mv.to)}${mv.crowned ? " (K)" : ""}`;
-    li.textContent = (State.turn === SIDES.TOON ? "Toon" : "Mon") + ": " + text;
+    li.textContent =
+      (State.turn === SIDES.TOON ? "Toon" : "Mon") +
+      ": " +
+      (mv.over
+        ? `${algebra(mv.from)} x ${algebra(mv.to)}`
+        : `${algebra(mv.from)} - ${algebra(mv.to)}`) +
+      (mv.crowned ? " (K)" : "");
     moveLogEl.appendChild(li);
     moveLogEl.scrollTop = moveLogEl.scrollHeight;
-  }
-
-  // ---------- Perform move & chain ----------
-  function pushHistory() {
-    State.history.push({
-      board: cloneBoard(State.board),
-      turn: State.turn,
-      selected: State.selected ? { ...State.selected } : null,
-      forcedChain: State.forcedChain ? { ...State.forcedChain } : null
-    });
-    if (State.history.length > 200) State.history.shift();
-  }
-
-  function performMove(mv, silent = false) {
-    pushHistory();
-    const res = applyMove(State.board, mv);
-    State.board = res.board;
-
-    if (!silent) {
-      logMove(mv);
-      if (mv.over) AudioSys.capture();
-      else AudioSys.move();
-      if (mv.crowned) AudioSys.crown();
-    }
-
-    // Multi-capture check if we captured and not crowned just now (American checkers: if crowned during a capturing move, the move ends; no further captures)
-    if (mv.over && !mv.crowned) {
-      const [tr, tc] = mv.to;
-      const more = pieceMoves(State.board, tr, tc).captures;
-      if (more.length) {
-        State.forcedChain = { r: tr, c: tc };
-        State.selected = { r: tr, c: tc };
-        renderBoard();
-        return; // same player's turn continues
-      }
-    }
-
-    // Check win
-    const opp = State.turn === SIDES.TOON ? SIDES.MON : SIDES.TOON;
-    const oppMoves = allMoves(State.board, opp);
-    const oppHasPieces = State.board.flat().some((p) => p && p.side === opp);
-    if (
-      !oppHasPieces ||
-      (oppMoves.captures.length === 0 && oppMoves.moves.length === 0)
-    ) {
-      endGame(
-        State.turn,
-        oppHasPieces
-          ? "Opponent has no legal moves"
-          : "All opponent pieces captured"
-      );
-      return;
-    }
-
-    // Switch turn
-    switchTurn();
-  }
-
-  function endGame(winner, reason) {
-    if (winner === SIDES.TOON) State.scores.toon++;
-    else State.scores.monstars++;
-    renderBoard();
-    clearInterval(State.timerHandle);
-    resultTitle.textContent = `${
-      winner === SIDES.TOON ? "Toon Squad" : "Monstars"
-    } win!`;
-    resultBody.textContent = reason || "GG!";
-    resultsModal.showModal();
-    AudioSys.win();
   }
 
   // ---------- Save / Load ----------
   function saveGame() {
     const payload = {
-      board: State.board,
+      board: cloneBoard(State.board),
       turn: State.turn,
-      scores: State.scores,
+      scores: { ...State.scores },
       mode: State.mode,
       timerPerTurn: parseInt(turnTimerInput.value || "0", 10)
     };
@@ -558,7 +430,9 @@
     const raw = localStorage.getItem("sj-checkers-save");
     if (!raw) return;
     const data = JSON.parse(raw);
-    State.board = data.board;
+    State.board = data.board.map((row) =>
+      row.map((p) => (p ? { ...p } : null))
+    );
     State.turn = data.turn;
     State.scores = data.scores || { toon: 0, monstars: 0 };
     State.mode = data.mode || "pvp";
@@ -567,12 +441,12 @@
     State.history = [];
     State.selected = null;
     State.forcedChain = null;
-    showGame();
+    renderBoard();
+    startTimer();
   }
 
   // ---------- AI ----------
   function aiMove() {
-    // Difficulty mapping
     const depth =
       State.mode === "ai-easy" ? 1 : State.mode === "ai-medium" ? 3 : 5;
     const mv = computeBestMove(State.board, SIDES.MON, depth);
@@ -583,156 +457,24 @@
     performMove(mv);
   }
 
-  function evaluate(board) {
-    // Simple heuristic: men=1, king=1.5 + mobility
-    let score = 0,
-      tm = 0,
-      mm = 0;
-    for (let r = 0; r < SIZE; r++)
-      for (let c = 0; c < SIZE; c++) {
-        const p = board[r][c];
-        if (!p) continue;
-        const val = p.king ? 1.5 : 1;
-        if (p.side === SIDES.MON) score += val;
-        else score -= val;
-        if (p.side === SIDES.MON) mm++;
-        else tm++;
-      }
-    const mob = allMoves(board, SIDES.MON);
-    const mob2 = allMoves(board, SIDES.TOON);
-    score += 0.05 * (mob.moves.length + 2 * mob.captures.length);
-    score -= 0.05 * (mob2.moves.length + 2 * mob2.captures.length);
-    // prefer center
-    for (let r = 0; r < SIZE; r++)
-      for (let c = 0; c < SIZE; c++) {
-        const p = board[r][c];
-        if (!p) continue;
-        const center = 3.5 - Math.abs(r - 3.5) + (3.5 - Math.abs(c - 3.5)); // 0..7
-        const w = 0.01 * center * (p.side === SIDES.MON ? 1 : -1);
-        score += w;
-      }
-    return score;
+  // ---------- End Game ----------
+  function endGame(winnerSide, reason) {
+    clearInterval(State.timerHandle);
+    stopMusic();
+    resultTitle.textContent =
+      winnerSide === SIDES.TOON ? "Toon Squad Wins!" : "Monstars Win!";
+    resultBody.textContent = reason || "";
+    resultsModal.showModal();
   }
 
-  function computeBestMove(board, side, depth) {
-    const maximizing = side === SIDES.MON;
-    const alphaBeta = (b, d, a, beta, turnSide) => {
-      // terminal?
-      const moves = allMoves(b, turnSide);
-      const noMoves = moves.captures.length === 0 && moves.moves.length === 0;
-      if (d === 0 || noMoves) return [evaluate(b), null];
-
-      const seq = moves.captures.length ? moves.captures : moves.moves; // enforce capture
-      let bestMove = null;
-
-      if (turnSide === SIDES.MON) {
-        // maximizing
-        let val = -Infinity;
-        for (const mv of seq) {
-          const { board: nb } = applyMove(b, mv);
-          // multi-capture continuation if possible and not crowned
-          let v;
-          if (mv.over && !mv.crowned) {
-            const [tr, tc] = mv.to;
-            const more = pieceMoves(nb, tr, tc).captures;
-            if (more.length) {
-              v = alphaBetaChain(nb, d, a, beta, SIDES.MON, tr, tc); // same depth
-            } else {
-              v = alphaBeta(nb, d - 1, a, beta, SIDES.TOON)[0];
-            }
-          } else {
-            v = alphaBeta(nb, d - 1, a, beta, SIDES.TOON)[0];
-          }
-          if (v > val) {
-            val = v;
-            bestMove = mv;
-          }
-          a = Math.max(a, val);
-          if (beta <= a) break;
-        }
-        return [val, bestMove];
-      } else {
-        // minimizing (Toon)
-        let val = Infinity;
-        for (const mv of seq) {
-          const { board: nb } = applyMove(b, mv);
-          let v;
-          if (mv.over && !mv.crowned) {
-            const [tr, tc] = mv.to;
-            const more = pieceMoves(nb, tr, tc).captures;
-            if (more.length) {
-              v = alphaBetaChain(nb, d, a, beta, SIDES.TOON, tr, tc);
-            } else {
-              v = alphaBeta(nb, d - 1, a, beta, SIDES.MON)[0];
-            }
-          } else {
-            v = alphaBeta(nb, d - 1, a, beta, SIDES.MON)[0];
-          }
-          if (v < val) {
-            val = v;
-            bestMove = mv;
-          }
-          beta = Math.min(beta, val);
-          if (beta <= a) break;
-        }
-        return [val, bestMove];
+  // ---------- AudioSys ----------
+  const AudioSys = {
+    tick: () => {
+      if (toggleSfx.checked) {
+        /* placeholder */
       }
-    };
-
-    // Handle forced multi-capture within a ply
-    const alphaBetaChain = (b, d, a, beta, sideInChain, r, c) => {
-      const caps = pieceMoves(b, r, c).captures;
-      if (!caps.length)
-        return alphaBeta(
-          b,
-          d - 1,
-          a,
-          beta,
-          sideInChain === SIDES.MON ? SIDES.TOON : SIDES.MON
-        )[0];
-      if (sideInChain === SIDES.MON) {
-        let val = -Infinity;
-        for (const mv of caps) {
-          const { board: nb } = applyMove(b, mv);
-          let v;
-          if (mv.over && !mv.crowned) {
-            const [tr, tc] = mv.to;
-            const more = pieceMoves(nb, tr, tc).captures;
-            v = more.length
-              ? alphaBetaChain(nb, d, a, beta, sideInChain, tr, tc)
-              : alphaBeta(nb, d - 1, a, beta, SIDES.TOON)[0];
-          } else {
-            v = alphaBeta(nb, d - 1, a, beta, SIDES.TOON)[0];
-          }
-          val = Math.max(val, v);
-          a = Math.max(a, val);
-          if (beta <= a) break;
-        }
-        return val;
-      } else {
-        let val = Infinity;
-        for (const mv of caps) {
-          const { board: nb } = applyMove(b, mv);
-          let v;
-          if (mv.over && !mv.crowned) {
-            const [tr, tc] = mv.to;
-            const more = pieceMoves(nb, tr, tc).captures;
-            v = more.length
-              ? alphaBetaChain(nb, d, a, beta, sideInChain, tr, tc)
-              : alphaBeta(nb, d - 1, a, beta, SIDES.MON)[0];
-          } else {
-            v = alphaBeta(nb, d - 1, a, beta, SIDES.MON)[0];
-          }
-          val = Math.min(val, v);
-          beta = Math.min(beta, val);
-          if (beta <= a) break;
-        }
-        return val;
-      }
-    };
-
-    return alphaBeta(board, depth, -Infinity, Infinity, side)[1];
-  }
+    }
+  };
 
   // ---------- Controls ----------
   btnStart.addEventListener("click", () => {
@@ -751,14 +493,14 @@
     gameScreen.classList.add("screen--active");
     renderBoard();
     startTimer();
-    if (toggleMusic.checked) AudioSys.startMusic();
+    if (toggleMusic.checked) playMusic();
     if (State.mode.startsWith("ai") && State.turn === SIDES.MON)
       setTimeout(aiMove, 400);
   }
 
   btnBackToMenu.addEventListener("click", () => {
     clearInterval(State.timerHandle);
-    AudioSys.stopMusic();
+    stopMusic();
     gameScreen.classList.remove("screen--active");
     menuScreen.classList.add("screen--active");
   });
@@ -774,7 +516,6 @@
   });
 
   btnUndo.addEventListener("click", () => {
-    // Only allowed when not AI's turn
     if (State.mode.startsWith("ai") && State.turn === SIDES.MON) return;
     const last = State.history.pop();
     if (!last) return;
@@ -785,33 +526,22 @@
     renderBoard();
   });
 
+  toggleHints.addEventListener("change", () => renderBoard());
+
   btnTutorialOpen.addEventListener("click", () => tutorialModal.showModal());
   btnTutorialClose.addEventListener("click", () => tutorialModal.close());
 
   btnSettingsOpen.addEventListener("click", () => settingsModal.showModal());
   btnSettingsClose.addEventListener("click", () => settingsModal.close());
 
-  btnRematch.addEventListener("click", () => {
-    resultsModal.close();
-    btnRestart.click();
-  });
-  btnCloseResult.addEventListener("click", () => resultsModal.close());
+  btnSave.addEventListener("click", saveGame);
+  btnLoad.addEventListener("click", loadGame);
 
   boardSizeRange.addEventListener("input", () => renderBoard());
-  toggleHints.addEventListener("change", () => renderBoard());
-
-  btnSave.addEventListener("click", () => saveGame());
-  btnLoad.addEventListener("click", () => loadGame());
-
-  // ---------- Build board once (squares only; pieces via render) ----------
-  function bootstrapGrid() {
-    // CSS grid squares are created in renderBoard with pieces; keep as-is
-  }
 
   // ---------- Init ----------
   (function init() {
     State.board = initialBoard();
-    bootstrapGrid();
     renderBoard();
   })();
 })();
