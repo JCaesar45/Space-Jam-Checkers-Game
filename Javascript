@@ -1,4 +1,4 @@
-/* Space Jam Checkers — Full JavaScript with fixes for music, save/load, hints, and performMove */
+/* Space Jam Checkers — Full JavaScript with fixes for music, save/load, hints, performMove, and buttons */
 
 (() => {
   // ---------- DOM helpers ----------
@@ -11,6 +11,8 @@
   const btnBackToMenu = $("#btnBackToMenu");
   const btnRestart = $("#btnRestart");
   const btnUndo = $("#btnUndo");
+  const btnRematch = $("#btnRematch");
+  const btnCloseResult = $("#btnCloseResult");
 
   const btnTutorialOpen = $("#btnTutorialOpen");
   const btnTutorialClose = $("#btnTutorialClose");
@@ -21,8 +23,6 @@
   const settingsModal = $("#settingsModal");
 
   const resultsModal = $("#resultsModal");
-  const btnRematch = $("#btnRematch");
-  const btnCloseResult = $("#btnCloseResult");
   const resultTitle = $("#resultTitle");
   const resultBody = $("#resultBody");
 
@@ -192,8 +192,7 @@
       : p.side === SIDES.TOON
       ? DIRS.toon
       : DIRS.monstars;
-    const moves = [],
-      captures = [];
+    const moves = [], captures = [];
     for (const [dr, dc] of dirs) {
       const nr = r + dr,
         nc = c + dc;
@@ -224,8 +223,7 @@
   }
 
   function allMoves(board, side) {
-    const caps = [],
-      quiet = [];
+    const caps = [], quiet = [];
     for (let r = 0; r < SIZE; r++)
       for (let c = 0; c < SIZE; c++) {
         const p = board[r][c];
@@ -268,6 +266,7 @@
 
   // ---------- Perform Move ----------
   function performMove(mv, isAuto = false) {
+    // Save current state for undo
     State.history.push({
       board: cloneBoard(State.board),
       turn: State.turn,
@@ -278,10 +277,12 @@
     const { board: newBoard, captured } = applyMove(State.board, mv);
     State.board = newBoard;
 
+    // Update scores
     if (captured) {
       State.scores[captured.side === SIDES.TOON ? "monstars" : "toon"]++;
     }
 
+    // Check for multi-capture sequence
     if (mv.over) {
       const further = pieceMoves(State.board, mv.to[0], mv.to[1]).captures;
       if (further.length) {
@@ -292,11 +293,14 @@
       }
     }
 
+    // Reset chain and selected
     State.forcedChain = null;
     State.selected = null;
 
+    // Log move
     logMove(mv);
 
+    // Check for game over
     const movesLeft = allMoves(
       State.board,
       State.turn === SIDES.TOON ? SIDES.MON : SIDES.TOON
@@ -306,6 +310,7 @@
       return;
     }
 
+    // Switch turn
     switchTurn();
   }
 
@@ -324,7 +329,9 @@
     State.timerHandle = setInterval(() => {
       State.timerRemaining--;
       timerEl.textContent = String(State.timerRemaining).padStart(2, "0");
-      AudioSys.tick();
+      if (toggleSfx.checked) {
+        /* placeholder for tick SFX */
+      }
       if (State.timerRemaining <= 0) {
         clearInterval(State.timerHandle);
         const { captures, moves } = allMoves(State.board, State.turn);
@@ -350,6 +357,7 @@
     renderBoard();
     startTimer();
 
+    // Trigger AI move if needed
     if (State.mode.startsWith("ai") && State.turn === SIDES.MON)
       setTimeout(aiMove, 300);
   }
@@ -446,15 +454,31 @@
   }
 
   // ---------- AI ----------
+  // Placeholder for computeBestMove (replace with your minimax implementation)
+  async function computeBestMove(board, side, depth) {
+    const moves = Object.values(allMoves(board, side)).flat();
+    if (moves.length === 0) return null;
+    // For testing, pick a random move
+    return moves[Math.floor(Math.random() * moves.length)];
+  }
+
   function aiMove() {
+    const modeVal = State.mode;
     const depth =
-      State.mode === "ai-easy" ? 1 : State.mode === "ai-medium" ? 3 : 5;
-    const mv = computeBestMove(State.board, SIDES.MON, depth);
-    if (!mv) {
-      endGame(SIDES.TOON, "AI has no moves");
-      return;
-    }
-    performMove(mv);
+      modeVal === "ai-easy" ? 1 :
+      modeVal === "ai-medium" ? 3 :
+      modeVal === "ai-hard" ? 5 :
+      5; // fallback
+
+    console.log("AI move: Mode:", modeVal, "Depth:", depth);
+
+    computeBestMove(State.board, SIDES.MON, depth).then((mv) => {
+      if (!mv) {
+        endGame(SIDES.TOON, "AI has no moves");
+        return;
+      }
+      performMove(mv);
+    });
   }
 
   // ---------- End Game ----------
@@ -467,18 +491,10 @@
     resultsModal.showModal();
   }
 
-  // ---------- AudioSys ----------
-  const AudioSys = {
-    tick: () => {
-      if (toggleSfx.checked) {
-        /* placeholder */
-      }
-    }
-  };
-
   // ---------- Controls ----------
   btnStart.addEventListener("click", () => {
     State.mode = modeSelect.value;
+    console.log("Game start mode:", State.mode);
     State.board = initialBoard();
     State.turn = firstMover.value === "toon" ? SIDES.TOON : SIDES.MON;
     State.selected = null;
@@ -493,11 +509,13 @@
     gameScreen.classList.add("screen--active");
     renderBoard();
     startTimer();
-    if (toggleMusic.checked) playMusic();
+
+    // If AI mode and it's Monstars turn, trigger AI move
     if (State.mode.startsWith("ai") && State.turn === SIDES.MON)
       setTimeout(aiMove, 400);
   }
 
+  // Buttons for navigating back, restart, undo
   btnBackToMenu.addEventListener("click", () => {
     clearInterval(State.timerHandle);
     stopMusic();
@@ -526,17 +544,22 @@
     renderBoard();
   });
 
+  // Hints toggle
   toggleHints.addEventListener("change", () => renderBoard());
 
+  // Tutorial modal
   btnTutorialOpen.addEventListener("click", () => tutorialModal.showModal());
   btnTutorialClose.addEventListener("click", () => tutorialModal.close());
 
+  // Settings modal
   btnSettingsOpen.addEventListener("click", () => settingsModal.showModal());
   btnSettingsClose.addEventListener("click", () => settingsModal.close());
 
+  // Save / Load buttons
   btnSave.addEventListener("click", saveGame);
   btnLoad.addEventListener("click", loadGame);
 
+  // Board size adjustment
   boardSizeRange.addEventListener("input", () => renderBoard());
 
   // ---------- Init ----------
@@ -544,4 +567,24 @@
     State.board = initialBoard();
     renderBoard();
   })();
+
+  // ---------- Additional event handlers for modal buttons (Rematch & Close) ----------
+  document
+    .querySelector("#btnRematch")
+    .addEventListener("click", () => {
+      State.board = initialBoard();
+      State.selected = null;
+      State.forcedChain = null;
+      State.history = [];
+      moveLogEl.innerHTML = "";
+      renderBoard();
+      startTimer();
+      resultsModal.close();
+    });
+
+  document
+    .querySelector("#btnCloseResult")
+    .addEventListener("click", () => {
+      resultsModal.close();
+    });
 })();
