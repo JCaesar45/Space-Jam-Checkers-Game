@@ -192,7 +192,8 @@
       : p.side === SIDES.TOON
       ? DIRS.toon
       : DIRS.monstars;
-    const moves = [], captures = [];
+    const moves = [],
+      captures = [];
     for (const [dr, dc] of dirs) {
       const nr = r + dr,
         nc = c + dc;
@@ -223,7 +224,8 @@
   }
 
   function allMoves(board, side) {
-    const caps = [], quiet = [];
+    const caps = [],
+      quiet = [];
     for (let r = 0; r < SIZE; r++)
       for (let c = 0; c < SIZE; c++) {
         const p = board[r][c];
@@ -454,21 +456,106 @@
   }
 
   // ---------- AI ----------
-  // Placeholder for computeBestMove (replace with your minimax implementation)
+  // Evaluate the board from the perspective of `side` (positive = good for `side`)
+  function evaluateBoard(board, side) {
+    let score = 0;
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        const p = board[r][c];
+        if (!p) continue;
+
+        // Basic piece values: regular piece = 1, king = 3
+        let value = p.king ? 3 : 1;
+
+        // Slightly prefer center columns for mobility/control
+        const centerBonus = 0.1 * (3 - Math.abs(3.5 - c));
+        value += centerBonus;
+
+        score += p.side === side ? value : -value;
+      }
+    }
+
+    // Mobility: number of moves available for side minus opponent moves
+    const myMoves = Object.values(allMoves(board, side)).flat().length;
+    const oppMoves = Object.values(
+      allMoves(board, side === SIDES.TOON ? SIDES.MON : SIDES.TOON)
+    ).flat().length;
+    score += 0.05 * (myMoves - oppMoves);
+
+    return score;
+  }
+
+  // Minimax with alpha-beta pruning
+  function minimax(board, depth, alpha, beta, currentSide, aiSide) {
+    if (depth === 0) {
+      return { score: evaluateBoard(board, aiSide) };
+    }
+
+    const movesObj = allMoves(board, currentSide);
+    const moves = movesObj.captures.length ? movesObj.captures : movesObj.moves;
+
+    if (moves.length === 0) {
+      // No moves = losing position for currentSide
+      return { score: currentSide === aiSide ? -Infinity : Infinity };
+    }
+
+    let bestMove = null;
+
+    if (currentSide === aiSide) {
+      // Maximizing player
+      let maxEval = -Infinity;
+      for (const mv of moves) {
+        // clone move to avoid mutating original
+        const mvCopy = JSON.parse(JSON.stringify(mv));
+        const { board: newBoard } = applyMove(board, mvCopy);
+        const nextSide = currentSide === SIDES.TOON ? SIDES.MON : SIDES.TOON;
+        const result = minimax(newBoard, depth - 1, alpha, beta, nextSide, aiSide);
+        if (result.score > maxEval) {
+          maxEval = result.score;
+          bestMove = mv;
+        }
+        alpha = Math.max(alpha, result.score);
+        if (beta <= alpha) break; // prune
+      }
+      return { score: maxEval, move: bestMove };
+    } else {
+      // Minimizing opponent
+      let minEval = Infinity;
+      for (const mv of moves) {
+        const mvCopy = JSON.parse(JSON.stringify(mv));
+        const { board: newBoard } = applyMove(board, mvCopy);
+        const nextSide = currentSide === SIDES.TOON ? SIDES.MON : SIDES.TOON;
+        const result = minimax(newBoard, depth - 1, alpha, beta, nextSide, aiSide);
+        if (result.score < minEval) {
+          minEval = result.score;
+          bestMove = mv;
+        }
+        beta = Math.min(beta, result.score);
+        if (beta <= alpha) break; // prune
+      }
+      return { score: minEval, move: bestMove };
+    }
+  }
+
+  // Drop-in replacement for your old computeBestMove (keeps same async signature)
   async function computeBestMove(board, side, depth) {
-    const moves = Object.values(allMoves(board, side)).flat();
-    if (moves.length === 0) return null;
-    // For testing, pick a random move
-    return moves[Math.floor(Math.random() * moves.length)];
+    // Map the user-friendly big depths used in aiMove to practical search depths
+    // (if you pass very large numbers like 10000 previously, we should use a sane cap)
+    const maxDepth = Math.min(depth, 8); // cap to avoid freezing the browser
+    const result = minimax(board, maxDepth, -Infinity, Infinity, side, side);
+    return result && result.move ? result.move : null;
   }
 
   function aiMove() {
     const modeVal = State.mode;
     const depth =
-      modeVal === "ai-easy" ? 1 :
-      modeVal === "ai-medium" ? 3 :
-      modeVal === "ai-hard" ? 5 :
-      5; // fallback
+      modeVal === "ai-easy"
+        ? 2
+        : modeVal === "ai-medium"
+        ? 4
+        : modeVal === "ai-hard"
+        ? 6
+        : 4; // fallback
 
     console.log("AI move: Mode:", modeVal, "Depth:", depth);
 
@@ -569,22 +656,18 @@
   })();
 
   // ---------- Additional event handlers for modal buttons (Rematch & Close) ----------
-  document
-    .querySelector("#btnRematch")
-    .addEventListener("click", () => {
-      State.board = initialBoard();
-      State.selected = null;
-      State.forcedChain = null;
-      State.history = [];
-      moveLogEl.innerHTML = "";
-      renderBoard();
-      startTimer();
-      resultsModal.close();
-    });
+  document.querySelector("#btnRematch").addEventListener("click", () => {
+    State.board = initialBoard();
+    State.selected = null;
+    State.forcedChain = null;
+    State.history = [];
+    moveLogEl.innerHTML = "";
+    renderBoard();
+    startTimer();
+    resultsModal.close();
+  });
 
-  document
-    .querySelector("#btnCloseResult")
-    .addEventListener("click", () => {
-      resultsModal.close();
-    });
+  document.querySelector("#btnCloseResult").addEventListener("click", () => {
+    resultsModal.close();
+  });
 })();
